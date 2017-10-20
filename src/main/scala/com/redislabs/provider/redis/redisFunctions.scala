@@ -226,6 +226,13 @@ class RedisContext(@transient val sc: SparkContext) extends Serializable {
     kvs.foreachPartition(partition => setKVs(partition, ttl, redisConfig))
   }
 
+
+  def toRedisIncrByKey(kvs: RDD[(String, String)], ttl: Int = 0)
+               (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
+    kvs.foreachPartition(partition => incrByKey(partition, ttl, redisConfig))
+  }
+
+
   /**
     * @param kvs      Pair RDD of K/V
     * @param hashName target hash's name which hold all the kvs
@@ -300,6 +307,25 @@ object RedisContext extends Serializable {
         else {
           x._2.foreach(x => pipeline.setex(x._1, ttl, x._2))
         }
+        pipeline.sync
+        conn.close
+      }
+    }
+  }
+
+
+  def incrByKey(arr: Iterator[(String, String)], ttl: Int, redisConfig: RedisConfig): Unit = {
+    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
+      mapValues(a => a.map(p => p._2)).foreach {
+      x => {
+        val conn = x._1.endpoint.connect()
+        val pipeline = conn.pipelined
+        x._2.foreach(x => {
+          pipeline.incrBy(x._1, x._2.toInt)
+          if (ttl > 0) {
+            pipeline.expire(x._1, ttl)
+          }
+        })
         pipeline.sync
         conn.close
       }
