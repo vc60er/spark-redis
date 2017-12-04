@@ -244,10 +244,6 @@ class RedisContext(@transient val sc: SparkContext) extends Serializable {
     kvs.foreachPartition(partition => decrByKey(partition, ttl, redisConfig))
   }
 
-  def toRedisCmdWithKVT(kvts: RDD[(String, String, String, String)])
-                       (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
-    kvts.foreachPartition(partition => cmdWithKVT(partition, redisConfig))
-  }
 
   def toRedisCmdWithKFVT(kfvts: RDD[(String, String, String, String, String)])
                        (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
@@ -392,37 +388,6 @@ object RedisContext extends Serializable {
   }
 
 
-  def cmdWithKVT(arr: Iterator[(String, String, String, String)], redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
-      mapValues(a => a.map(p => p._2)).foreach {
-      x => {
-        val conn = x._1.endpoint.connect()
-        val pipeline = conn.pipelined
-        x._2.foreach(x => {
-
-          var cmd = x._1.toString.toLowerCase
-          var key = x._2.toString
-          var value = x._3.toInt
-          var ttl = x._4.toInt
-
-          var err_cmd = false
-          cmd match {
-            case "decrby" => pipeline.decrBy(key, value)
-            case "incrby" => pipeline.incrBy(key, value)
-            case "set" => pipeline.set(key, value.toString)
-            case _ => err_cmd = true
-          }
-
-          if (!err_cmd && ttl > 0) {
-            pipeline.expire(key, ttl)
-          }
-        })
-        pipeline.sync
-        conn.close
-      }
-    }
-  }
-
 
   def cmdWithKFVT(arr: Iterator[(String, String, String, String, String)], redisConfig: RedisConfig): Unit = {
     arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
@@ -437,11 +402,19 @@ object RedisContext extends Serializable {
           var filed = x._3.toString;
           var value = x._4.toInt;
           var ttl = x._5.toInt;
-
+          
           var err_cmd = false
           cmd match {
-            case "hincrby" => pipeline.hincrBy(key, filed, value);
+            case "hincrby" => pipeline.hincrBy(key, filed, value)
+            case "decrby" => pipeline.decrBy(key, value)
+            case "incrby" => pipeline.incrBy(key, value)
+            case "set" => pipeline.set(key, value.toString)
             case _ => err_cmd = true
+          }
+
+          if (err_cmd) {
+            System.err.println("cmdWithKFVT: error not supported"
+              + " cmd=" + cmd + " key=" + key + " filed=" + filed + " value=" + value, " ttl=" + ttl)
           }
 
           if (!err_cmd && ttl > 0) {
