@@ -14,7 +14,7 @@
 		<java.version>1.7</java.version>
 		<scala.minor.version>2.10</scala.minor.version>
 		<scala.complete.version>${scala.minor.version}.4</scala.complete.version>
-		<jedis.version>2.7.2</jedis.version>
+		<jedis.version>2.9.0</jedis.version>
 		<spark.version>1.4.1</spark.version>
 	</properties>
 

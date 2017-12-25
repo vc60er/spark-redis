@@ -390,7 +390,7 @@ object RedisContext extends Serializable {
 
 
   def cmdWithKFVT(arr: Iterator[(String, String, String, String, String)], redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
+    arr.map(kv => (redisConfig.getHost(kv._2), kv)).toArray.groupBy(_._1).
       mapValues(a => a.map(p => p._2)).foreach {
       x => {
         val conn = x._1.endpoint.connect()
@@ -403,21 +403,16 @@ object RedisContext extends Serializable {
           var value = x._4.toInt;
           var ttl = x._5.toInt;
           
-          var err_cmd = false
           cmd match {
             case "hincrby" => pipeline.hincrBy(key, filed, value)
             case "decrby" => pipeline.decrBy(key, value)
             case "incrby" => pipeline.incrBy(key, value)
             case "set" => pipeline.set(key, value.toString)
-            case _ => err_cmd = true
+            case _ => throw new scala.Exception("cmdWithKFVT: error not supported cmd=" + cmd)
           }
 
-          if (err_cmd) {
-            System.err.println("cmdWithKFVT: error not supported"
-              + " cmd=" + cmd + " key=" + key + " filed=" + filed + " value=" + value, " ttl=" + ttl)
-          }
 
-          if (!err_cmd && ttl > 0) {
+          if (ttl > 0) {
             pipeline.expire(key, ttl)
           }
         })
