@@ -227,28 +227,14 @@ class RedisContext(@transient val sc: SparkContext) extends Serializable {
   }
 
 
-  def toRedisIncrByKey(kvs: RDD[(String, String)], ttl: Int = 0)
-               (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
-    kvs.foreachPartition(partition => incrByKey(partition, ttl, redisConfig))
-  }
-
-
-  def toRedisHincrByKey(kvs: RDD[(String, String, String)], ttl: Int = 0)
-                      (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
-    kvs.foreachPartition(partition => hincrByKey(partition, ttl, redisConfig))
-  }
-
-
-  def toRedisDecrByKey(kvs: RDD[(String, String)], ttl: Int = 0)
-                      (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
-    kvs.foreachPartition(partition => decrByKey(partition, ttl, redisConfig))
-  }
-
-
-  def toRedisCmdWithKFVT(kfvts: RDD[(String, String, String, String, String)])
+  /**
+    * @param mp Map RDD of redis command, key, field, value, ttl....
+    */
+  def toRedisCmdMap(mp: RDD[Map[String, String]])
                        (implicit redisConfig: RedisConfig = new RedisConfig(new RedisEndpoint(sc.getConf))) {
-    kfvts.foreachPartition(partition => cmdWithKFVT(partition, redisConfig))
+    mp.foreachPartition(partition => cmdWithMap(partition, redisConfig))
   }
+
 
   /**
     * @param kvs      Pair RDD of K/V
@@ -331,89 +317,38 @@ object RedisContext extends Serializable {
   }
 
 
-  def incrByKey(arr: Iterator[(String, String)], ttl: Int, redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
-      mapValues(a => a.map(p => p._2)).foreach {
-      x => {
-        val conn = x._1.endpoint.connect()
-        val pipeline = conn.pipelined
-        x._2.foreach(x => {
-          pipeline.incrBy(x._1, x._2.toInt)
-          if (ttl > 0) {
-            pipeline.expire(x._1, ttl)
-          }
-        })
-        pipeline.sync
-        conn.close
-      }
-    }
-  }
 
-
-  def hincrByKey(arr: Iterator[(String, String, String)], ttl: Int, redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
-      mapValues(a => a.map(p => p._2)).foreach {
-      x => {
-        val conn = x._1.endpoint.connect()
-        val pipeline = conn.pipelined
-        x._2.foreach(x => {
-          pipeline.hincrBy(x._1, x._2, x._3.toInt)
-          if (ttl > 0) {
-            pipeline.expire(x._1, ttl)
-          }
-        })
-        pipeline.sync
-        conn.close
-      }
-    }
-  }
-
-
-  def decrByKey(arr: Iterator[(String, String)], ttl: Int, redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._1), kv)).toArray.groupBy(_._1).
-      mapValues(a => a.map(p => p._2)).foreach {
-      x => {
-        val conn = x._1.endpoint.connect()
-        val pipeline = conn.pipelined
-        x._2.foreach(x => {
-          pipeline.decrBy(x._1, x._2.toInt)
-          if (ttl > 0) {
-            pipeline.expire(x._1, ttl)
-          }
-        })
-        pipeline.sync
-        conn.close
-      }
-    }
-  }
-
-
-
-  def cmdWithKFVT(arr: Iterator[(String, String, String, String, String)], redisConfig: RedisConfig): Unit = {
-    arr.map(kv => (redisConfig.getHost(kv._2), kv)).toArray.groupBy(_._1).
+  def cmdWithMap(arr: Iterator[Map[String, String]], redisConfig: RedisConfig): Unit = {
+    arr.map(kv => (redisConfig.getHost(kv("key")), kv)).toArray.groupBy(_._1).
       mapValues(a => a.map(p => p._2)).foreach {
       x => {
         val conn = x._1.endpoint.connect()
         val pipeline = conn.pipelined
         x._2.foreach(x => {
 
-          var cmd = x._1.toString.toLowerCase
-          var key = x._2.toString;
-          var filed = x._3.toString;
-          var value = x._4.toInt;
-          var ttl = x._5.toInt;
-          
+          var cmd = x("cmd")
+          var key = x("key")
+          var value = x("value")
+          var ttl = x.getOrElse("ttl", "0")
+
+//          System.out.println("cmdWithMap: "
+//            + " cmd=" + cmd
+//            + " key=" + key
+//            + " value=" + value
+//            + " ttl=" + ttl
+//          )
+
           cmd match {
-            case "hincrby" => pipeline.hincrBy(key, filed, value)
-            case "decrby" => pipeline.decrBy(key, value)
-            case "incrby" => pipeline.incrBy(key, value)
-            case "set" => pipeline.set(key, value.toString)
-            case _ => throw new scala.Exception("cmdWithKFVT: error not supported cmd=" + cmd)
+            case "hincrby" => pipeline.hincrBy(key, x("field"), value.toInt)
+            case "decrby" => pipeline.decrBy(key, value.toInt)
+            case "incrby" => pipeline.incrBy(key, value.toInt)
+            case "set" => pipeline.set(key, value)
+            case "eval" => pipeline.eval(x("script"), 1, key, x("field"), value, ttl, x("begin"), x("end"))
+            case _ => throw new scala.Exception("cmdWithMap: error not supported cmd=" + cmd)
           }
 
-
-          if (ttl > 0) {
-            pipeline.expire(key, ttl)
+          if (cmd != "eval" && ttl.toInt > 0) {
+            pipeline.expire(key, ttl.toInt)
           }
         })
         pipeline.sync
@@ -421,7 +356,6 @@ object RedisContext extends Serializable {
       }
     }
   }
-
 
 
   /**
