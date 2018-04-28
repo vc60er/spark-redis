@@ -12,7 +12,7 @@ You'll need the the following to use Spark-Redis:
 
  - Apache Spark v1.4.0
  - Scala v2.10.4
- - Jedis v2.7
+ - Jedis v2.9
  - Redis v2.8.12 or v3.0.3
 
 ## Known limitations
@@ -277,6 +277,37 @@ val ssc = new StreamingContext(sc, Seconds(1))
 val redisStream = ssc.createRedisStreamWithoutListname(Array("foo", "bar"), storageLevel = StorageLevel.MEMORY_AND_DISK_2)
 redisStream.print
 ssc.awaitTermination()
+```
+
+#### Common write api
+```
+	/**
+    * @param mp Map RDD of redis command, key, field, value, ttl....
+    */
+  	def toRedisCmdMap(mp: RDD[Map[String, String]])
+  		
+```
+the map contains redis command、key、value and other parameters which need.  
+
+
+|key|type|support value|optional|
+|----|----|------------|---|
+|cmd|string|hincrby,decrby,incrby,set,eval|Y|
+|key|string||Y|
+|value|string||Y|
+|field|string||N|
+|ttl|string||N|
+|script|string||N|
+
+
+example:
+
+```
+...
+var seq= Seq(Map(("cmd"->"set"), ("key"->"key"), ("value"->"value")),
+				Map(("cmd"->"set"), ("key"->"key"), ("value"->"value")))
+var rdd=sc.parallelize(seq)
+sc.toRedisCmdMap(rdd)
 ```
 
 
